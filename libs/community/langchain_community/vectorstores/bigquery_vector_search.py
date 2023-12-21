@@ -437,6 +437,8 @@ class BigQueryVectorSearch(VectorStore):
         embedding: List[float],
         k: int = DEFAULT_TOP_K,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
     ) -> List[Tuple[Document, List[float], float]]:
         from google.cloud import bigquery
 
@@ -474,6 +476,19 @@ class BigQueryVectorSearch(VectorStore):
         # Default to EUCLIDEAN_DISTANCE
         else:
             distance_type = "EUCLIDEAN"
+        if brute_force:
+            options_string = ",options => '{\"use_brute_force\":true}'"
+        elif fraction_lists_to_search:
+            if fraction_lists_to_search == 0 or fraction_lists_to_search >= 1.0:
+                raise ValueError(
+                    "`fraction_lists_to_search` must be between " "0.0 and 1.0"
+                )
+            options_string = (
+                ',options => \'{"fraction_lists_to_search":'
+                f"{fraction_lists_to_search}}}'"
+            )
+        else:
+            options_string = ""
         query = f"""
             SELECT
                 base.*,
@@ -484,6 +499,7 @@ class BigQueryVectorSearch(VectorStore):
                 (SELECT @v AS `{self.text_embedding_field}`),
                 distance_type => "{distance_type}",
                 top_k => {k}
+                {options_string}
             )
             WHERE {filter_expr}
             ORDER BY ABS(_vector_search_distance) ASC
@@ -520,6 +536,8 @@ class BigQueryVectorSearch(VectorStore):
         embedding: List[float],
         k: int = DEFAULT_TOP_K,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
         """Return docs most similar to embedding vector.
@@ -532,13 +550,17 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
 
         Returns:
             List of Documents most similar to the query vector with distance.
         """
         del kwargs
         document_tuples = self._search_with_score_and_embeddings_by_vector(
-            embedding, k, filter
+            embedding, k, filter, brute_force, fraction_lists_to_search
         )
         return [(doc, distance) for doc, _, distance in document_tuples]
 
@@ -547,6 +569,8 @@ class BigQueryVectorSearch(VectorStore):
         embedding: List[float],
         k: int = DEFAULT_TOP_K,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Return docs most similar to embedding vector.
@@ -559,12 +583,16 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
 
         Returns:
             List of Documents most similar to the query vector.
         """
         tuples = self.similarity_search_with_score_by_vector(
-            embedding, k, filter, **kwargs
+            embedding, k, filter, brute_force, fraction_lists_to_search, **kwargs
         )
         return [i[0] for i in tuples]
 
@@ -573,6 +601,8 @@ class BigQueryVectorSearch(VectorStore):
         query: str,
         k: int = DEFAULT_TOP_K,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
         """Run similarity search with score.
@@ -585,18 +615,26 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
 
         Returns:
             List of Documents most similar to the query vector, with similarity scores.
         """
         emb = self.embedding_model.embed_query(query)  # type: ignore
-        return self.similarity_search_with_score_by_vector(emb, k, filter, **kwargs)
+        return self.similarity_search_with_score_by_vector(
+            emb, k, filter, brute_force, fraction_lists_to_search, **kwargs
+        )
 
     def similarity_search(
         self,
         query: str,
         k: int = DEFAULT_TOP_K,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Run similarity search.
@@ -609,11 +647,17 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
 
         Returns:
             List of Documents most similar to the query vector.
         """
-        tuples = self.similarity_search_with_score(query, k, filter, **kwargs)
+        tuples = self.similarity_search_with_score(
+            query, k, filter, brute_force, fraction_lists_to_search, **kwargs
+        )
         return [i[0] for i in tuples]
 
     def _select_relevance_score_fn(self) -> Callable[[float], float]:
@@ -632,6 +676,8 @@ class BigQueryVectorSearch(VectorStore):
         fetch_k: int = DEFAULT_TOP_K * 5,
         lambda_mult: float = 0.5,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Return docs selected using the maximal marginal relevance.
@@ -652,6 +698,10 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
         Returns:
             List of Documents selected by maximal marginal relevance.
         """
@@ -659,7 +709,7 @@ class BigQueryVectorSearch(VectorStore):
             query
         )
         doc_tuples = self._search_with_score_and_embeddings_by_vector(
-            query_embedding, fetch_k, filter
+            query_embedding, fetch_k, filter, brute_force, fraction_lists_to_search
         )
         doc_embeddings = [d[1] for d in doc_tuples]
         mmr_doc_indexes = maximal_marginal_relevance(
@@ -674,6 +724,8 @@ class BigQueryVectorSearch(VectorStore):
         fetch_k: int = DEFAULT_TOP_K * 5,
         lambda_mult: float = 0.5,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Return docs selected using the maximal marginal relevance.
@@ -694,11 +746,15 @@ class BigQueryVectorSearch(VectorStore):
                                 "str_property": "foo",
                                 "int_property": 123
                             }
+            brute_force: Wether to use brute force search. Defaults to False.
+            fraction_lists_to_search: Optional percentage of lists to search,
+                must be in range 0.0 and 1.0, exclusive.
+                If Node, uses service's default which is 0.05.
         Returns:
             List of Documents selected by maximal marginal relevance.
         """
         doc_tuples = self._search_with_score_and_embeddings_by_vector(
-            embedding, fetch_k, filter
+            embedding, fetch_k, filter, brute_force, fraction_lists_to_search
         )
         doc_embeddings = [d[1] for d in doc_tuples]
         mmr_doc_indexes = maximal_marginal_relevance(
@@ -713,6 +769,8 @@ class BigQueryVectorSearch(VectorStore):
         fetch_k: int = DEFAULT_TOP_K * 5,
         lambda_mult: float = 0.5,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Return docs selected using the maximal marginal relevance."""
@@ -724,6 +782,8 @@ class BigQueryVectorSearch(VectorStore):
             fetch_k=fetch_k,
             lambda_mult=lambda_mult,
             filter=filter,
+            brute_force=brute_force,
+            fraction_lists_to_search=fraction_lists_to_search,
             **kwargs,
         )
         return await asyncio.get_event_loop().run_in_executor(None, func)
@@ -735,6 +795,8 @@ class BigQueryVectorSearch(VectorStore):
         fetch_k: int = DEFAULT_TOP_K * 5,
         lambda_mult: float = 0.5,
         filter: Optional[Dict[str, Any]] = None,
+        brute_force: bool = False,
+        fraction_lists_to_search: Optional[float] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Return docs selected using the maximal marginal relevance."""
@@ -746,6 +808,8 @@ class BigQueryVectorSearch(VectorStore):
             fetch_k,
             lambda_mult,
             filter,
+            brute_force,
+            fraction_lists_to_search,
         )
 
     @classmethod
