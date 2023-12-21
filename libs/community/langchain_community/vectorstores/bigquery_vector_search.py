@@ -5,7 +5,6 @@ import asyncio
 import json
 import logging
 import sys
-import time
 import uuid
 from datetime import datetime
 from functools import partial
@@ -245,7 +244,7 @@ class BigQueryVectorSearch(VectorStore):
         index_name = f"{self.table_name}_langchain_index"
         try:
             sql = f"""
-                CREATE OR REPLACE VECTOR INDEX
+                CREATE VECTOR INDEX IF NOT EXISTS
                 `{self.project_id}.{self.dataset_name}.{index_name}`
                 ON `{self.full_table_id}`(`{self.text_embedding_field}`)
                 OPTIONS(distance_type="{distance_type}", index_type="IVF")
@@ -506,18 +505,12 @@ class BigQueryVectorSearch(VectorStore):
             LIMIT {k}
         """
         document_tuples: List[Tuple[Document, List[float], float]] = []
-        started = time.time()
-        # Using query_and_wait to minimize job latency.
+        started = datetime.utcnow()
         # TODO(vladkol): Use jobCreationMode=JOB_CREATION_OPTIONAL when available.
         job = self.bq_client.query(
             query, job_config=job_config, api_method=bigquery.enums.QueryApiMethod.QUERY
         )
-        ended = time.time()
-        # Checking if the query was too slow.
-        # We cannot use real job statistics as it requires creating a job object
-        # which will increase latency overhead.
-        if not self._have_index and (ended - started) >= _SLOW_SEARCH_SECONDS:
-            self._create_index_in_background()
+        ended = datetime.utcnow()
         for row in job:
             metadata = row[self.metadata_field]
             if metadata:
@@ -529,6 +522,15 @@ class BigQueryVectorSearch(VectorStore):
             document_tuples.append(
                 (doc, row[self.text_embedding_field], row["_vector_search_distance"])
             )
+        # Updating job start and end time with real values if available.
+        started = job.started or started
+        ended = job.ended or ended
+        # Checking if the query was too slow.
+        if (
+            not self._have_index
+            and (ended - started).total_seconds() >= _SLOW_SEARCH_SECONDS
+        ):
+            self._create_index_in_background()
         return document_tuples
 
     def similarity_search_with_score_by_vector(
