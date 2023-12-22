@@ -148,7 +148,7 @@ class BigQueryVectorSearch(VectorStore):
             or columns[self.metadata_field].mode == "REPEATED"
         ):
             raise ValueError(
-                f"Column {self.metadata_field} " "must be of STRING or JSON type"
+                f"Column {self.metadata_field} must be of STRING or JSON type"
             )
         if self.content_field not in columns:
             changed_schema = True
@@ -200,8 +200,8 @@ class BigQueryVectorSearch(VectorStore):
         # Check if index exists, create if necessary
         check_query = (
             f"SELECT 1 FROM `{self.project_id}.{self.dataset_name}"
-            ".INFORMATION_SCHEMA.VECTOR_INDEXES WHERE"
-            f"table_name = '{self.table_name}'"
+            ".INFORMATION_SCHEMA.VECTOR_INDEXES` WHERE"
+            f" table_name = '{self.table_name}'"
         )
         job = self.bq_client.query(
             check_query, api_method=bigquery.enums.QueryApiMethod.QUERY
