@@ -246,7 +246,7 @@ class BigQueryVectorSearch(VectorStore):
             sql = f"""
                 CREATE VECTOR INDEX IF NOT EXISTS
                 `{self.project_id}.{self.dataset_name}.{index_name}`
-                ON `{self.full_table_id}`(`{self.text_embedding_field}`)
+                ON `{self.full_table_id}`({self.text_embedding_field})
                 OPTIONS(distance_type="{distance_type}", index_type="IVF")
             """
             self.bq_client.query(sql).result()
@@ -495,7 +495,7 @@ class BigQueryVectorSearch(VectorStore):
             FROM VECTOR_SEARCH(
                 TABLE `{self.full_table_id}`,
                 "{self.text_embedding_field}",
-                (SELECT @v AS `{self.text_embedding_field}`),
+                (SELECT @v AS {self.text_embedding_field}),
                 distance_type => "{distance_type}",
                 top_k => {k}
                 {options_string}
